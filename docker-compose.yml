@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: books_crawler_mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: books_crawler
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  crawler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: books_crawler_crawler
+    command: python -m crawler.main
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - MONGODB_DB_NAME=books_crawler
+    volumes:
+      - ./logs:/app/logs
+    restart: on-failure
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: books_crawler_scheduler
+    command: python -m scheduler.main
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - MONGODB_DB_NAME=books_crawler
+    volumes:
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: books_crawler_api
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - MONGODB_DB_NAME=books_crawler
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  mongodb_data:
+

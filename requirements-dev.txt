@@ -1,0 +1,18 @@
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.23.3
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+httpx==0.26.0
+
+# Code quality
+black==23.12.1
+isort==5.13.2
+mypy==1.8.0
+flake8==7.0.0
+pylint==3.0.3
+
+# Type stubs
+types-beautifulsoup4==4.12.0.20240106
+types-python-dateutil==2.8.19.20240106
+
