@@ -447,7 +447,7 @@ MIT License
 
 ## Contact
 
-For questions or issues, contact: sudipto@filerskeepers.co
+For questions or issues, contact: gideonyuri15@gmail.com
 
 
 ## Environment Configuration
