@@ -98,12 +98,13 @@ LOG_LEVEL=INFO
 LOG_FILE=logs/crawler.log
 
 # Scheduler / Alerts
+# (defaults wire to the Ethereal demo account; override for production)
 SCHEDULER_ENABLE_EMAIL_ALERTS=false
 SCHEDULER_SMTP_HOST=smtp.ethereal.email
 SCHEDULER_SMTP_PORT=587
-SCHEDULER_SMTP_USER=
-SCHEDULER_SMTP_PASSWORD=
-SCHEDULER_ALERT_EMAIL_TO=
+SCHEDULER_SMTP_USER=bria.oconnell@ethereal.email
+SCHEDULER_SMTP_PASSWORD=EguKQgdWQwzyBDAFtt
+SCHEDULER_ALERT_EMAIL_TO=bria.oconnell@ethereal.email
 ```
 
 ## Running the Application
@@ -260,9 +261,9 @@ All configuration is done via environment variables (see `.env.example`):
 - `SCHEDULER_ENABLE_EMAIL_ALERTS`: Enable email alerts (default: false)
 - `SCHEDULER_SMTP_HOST`: SMTP host (default: smtp.ethereal.email)
 - `SCHEDULER_SMTP_PORT`: SMTP port (default: 587)
-- `SCHEDULER_SMTP_USER`: SMTP username (blank by default; provide your own when enabling alerts)
-- `SCHEDULER_SMTP_PASSWORD`: SMTP password (blank by default)
-- `SCHEDULER_ALERT_EMAIL_TO`: Alert recipient address (blank by default)
+- `SCHEDULER_SMTP_USER`: SMTP username (Ethereal demo account by default)
+- `SCHEDULER_SMTP_PASSWORD`: SMTP password (Ethereal demo account by default)
+- `SCHEDULER_ALERT_EMAIL_TO`: Alert recipient address (defaults to the Ethereal inbox)
 
 ## Database Schema
 

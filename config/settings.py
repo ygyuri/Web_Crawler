@@ -182,15 +182,15 @@ class SchedulerSettings(BaseSettings):
         description="SMTP server port"
     )
     smtp_user: str = Field(
-        default="",
+        default="bria.oconnell@ethereal.email",
         description="SMTP username"
     )
     smtp_password: str = Field(
-        default="",
+        default="EguKQgdWQwzyBDAFtt",
         description="SMTP password"
     )
     alert_email_to: str = Field(
-        default="",
+        default="bria.oconnell@ethereal.email",
         description="Email address for alerts"
     )
 
