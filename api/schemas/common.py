@@ -46,11 +46,20 @@ class BookFilters(BaseModel):
 class ChangeFilters(BaseModel):
     """Query filters for changes endpoint."""
 
+    class ChangeType(str, Enum):
+        """Supported change types."""
+
+        NEW_BOOK = "new_book"
+        PRICE_CHANGE = "price_change"
+        AVAILABILITY_CHANGE = "availability_change"
+        DESCRIPTION_CHANGE = "description_change"
+        RATING_CHANGE = "rating_change"
+
     since: Optional[datetime] = Field(
         None,
         description="Filter changes since this datetime"
     )
-    change_type: Optional[str] = Field(
+    change_type: Optional[ChangeType] = Field(
         None,
         description="Filter by change type (new, price_change, availability_change)"
     )

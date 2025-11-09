@@ -1,7 +1,10 @@
 """Scheduled task definitions."""
 
 import asyncio
-from datetime import datetime
+import smtplib
+from email.message import EmailMessage
+from typing import Optional
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -29,31 +32,38 @@ class TaskScheduler:
             logger.warning("Scheduler is already running")
             return
 
-        # Add daily crawl job
+        trigger = CronTrigger(
+            hour=settings.scheduler.crawl_schedule_hour,
+            minute=settings.scheduler.crawl_schedule_minute,
+            timezone=ZoneInfo(settings.scheduler.timezone),
+        )
+
         self.scheduler.add_job(
             self.run_daily_crawl,
-            CronTrigger(
-                hour=settings.scheduler.crawl_schedule_hour,
-                minute=settings.scheduler.crawl_schedule_minute,
-                timezone=settings.scheduler.timezone
-            ),
+            trigger=trigger,
             id="daily_crawl",
             name="Daily Book Crawl",
-            replace_existing=True
+            replace_existing=True,
+            misfire_grace_time=60 * 10,  # 10 minutes grace period
+            coalesce=True,
+            max_instances=1,
         )
 
         self.scheduler.start()
         self.is_running = True
         logger.info(
-            f"Scheduler started. Daily crawl scheduled for "
-            f"{settings.scheduler.crawl_schedule_hour:02d}:"
-            f"{settings.scheduler.crawl_schedule_minute:02d} {settings.scheduler.timezone}"
+            "Scheduler started",
+            extra={
+                "hour": settings.scheduler.crawl_schedule_hour,
+                "minute": settings.scheduler.crawl_schedule_minute,
+                "timezone": settings.scheduler.timezone,
+            },
         )
 
     async def stop(self) -> None:
         """Stop the scheduler."""
         if self.scheduler.running:
-            self.scheduler.shutdown()
+            self.scheduler.shutdown(wait=False)
             self.is_running = False
             logger.info("Scheduler stopped")
 
@@ -63,7 +73,6 @@ class TaskScheduler:
 
         This method is called by the scheduler.
         """
-        # Prevent concurrent runs
         if self.lock.locked():
             logger.warning("Daily crawl already running, skipping")
             return
@@ -72,28 +81,19 @@ class TaskScheduler:
             try:
                 logger.info("Starting scheduled daily crawl")
 
-                # Run change detection
                 detector = ChangeDetector()
-                await detector.initialize()
+                stats = await detector.detect_changes()
+                logger.info("Change detection completed", extra=stats)
 
-                try:
-                    stats = await detector.detect_changes()
-                    logger.info(f"Change detection completed: {stats}")
-
-                    # Generate report
-                    reporter = ReportGenerator()
-                    await reporter.generate_daily_report(stats)
-
-                finally:
-                    await detector.close()
+                reporter = ReportGenerator()
+                await reporter.generate_daily_report(stats)
 
                 logger.info("Scheduled daily crawl completed successfully")
 
-            except Exception as e:
-                logger.error(f"Scheduled daily crawl failed: {e}", exc_info=True)
-                # Send alert if configured
+            except Exception as exc:
+                logger.error("Scheduled daily crawl failed", exc_info=True)
                 if settings.scheduler.enable_email_alerts:
-                    await self._send_alert(f"Daily crawl failed: {str(e)}")
+                    await self._send_alert(f"Daily crawl failed: {exc}")
 
     async def _send_alert(self, message: str) -> None:
         """
@@ -102,6 +102,44 @@ class TaskScheduler:
         Args:
             message: Alert message
         """
-        # TODO: Implement email sending
-        logger.warning(f"Alert: {message}")
+        if not settings.scheduler.alert_email_to:
+            logger.warning("Alert email requested but no recipient configured")
+            return
+
+        email_message = EmailMessage()
+        email_message["Subject"] = "[Crawler] Daily crawl alert"
+        email_message["From"] = settings.scheduler.smtp_user or "crawler@localhost"
+        email_message["To"] = settings.scheduler.alert_email_to
+        email_message.set_content(message)
+
+        try:
+            if settings.scheduler.smtp_user and settings.scheduler.smtp_password:
+                server = smtplib.SMTP(
+                    settings.scheduler.smtp_host,
+                    settings.scheduler.smtp_port
+                )
+                server.starttls()
+                server.login(
+                    settings.scheduler.smtp_user,
+                    settings.scheduler.smtp_password
+                )
+            else:
+                server = smtplib.SMTP(
+                    settings.scheduler.smtp_host,
+                    settings.scheduler.smtp_port
+                )
+
+            with server:
+                server.send_message(email_message)
+
+            logger.info(
+                "Alert email sent",
+                extra={"recipient": settings.scheduler.alert_email_to}
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to send alert email",
+                extra={"error": str(exc)},
+                exc_info=True
+            )
 

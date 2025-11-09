@@ -2,15 +2,15 @@
 httpx==0.26.0
 aiohttp==3.9.1
 beautifulsoup4==4.12.2
-lxml==4.9.3
+lxml>=5.0.0
 
 # Database
 motor==3.3.2
 pymongo==4.6.1
 
 # Data validation
-pydantic==2.5.3
-pydantic-settings==2.1.0
+pydantic>=2.9.0
+pydantic-settings>=2.6.0
 
 # API
 fastapi==0.109.0

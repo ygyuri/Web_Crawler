@@ -1,22 +1,34 @@
 """HTML parsing utilities for extracting book data."""
 
-from typing import Optional
-from urllib.parse import urljoin, urlparse
+from dataclasses import dataclass
+import re
+from typing import List, Optional
 
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 
 from config.logging_config import get_logger
 from config.settings import settings
 from crawler.models import Book, Rating
 from utils.exceptions import ParsingError
+from utils.hashing import generate_content_hash
 from utils.validators import (
-    extract_price,
     extract_number,
+    extract_price,
     normalize_url,
-    sanitize_html
+    sanitize_html,
 )
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class CatalogPageSummary:
+    """Summary information extracted from a catalog listing page."""
+
+    book_urls: List[str]
+    has_next: bool
+    current_page: Optional[int]
+    total_pages: Optional[int]
 
 
 class BookParser:
@@ -27,7 +39,7 @@ class BookParser:
         Initialize parser.
 
         Args:
-            base_url: Base URL for normalizing relative URLs
+            base_url: Base URL for normalizing relative URLs.
         """
         self.base_url = base_url or str(settings.crawler.base_url)
 
@@ -36,19 +48,19 @@ class BookParser:
         Parse book data from HTML page.
 
         Args:
-            html: HTML content
-            url: Source URL
+            html: HTML content.
+            url: Source URL.
 
         Returns:
-            Book model instance
+            Book model instance.
 
         Raises:
-            ParsingError: If parsing fails
+            ParsingError: If parsing fails.
         """
         try:
             soup = BeautifulSoup(html, "lxml")
 
-            # Extract all fields
+            # Extract all fields with defensive fallbacks.
             name = self._extract_name(soup)
             description = self._extract_description(soup)
             category = self._extract_category(soup)
@@ -56,14 +68,12 @@ class BookParser:
             price_incl_tax = self._extract_price_incl_tax(soup)
             availability = self._extract_availability(soup)
             num_reviews = self._extract_num_reviews(soup)
-            image_url = self._extract_image_url(soup, url)
+            image_url = self._extract_image_url(soup)
             rating = self._extract_rating(soup)
 
-            # Generate content hash (will be done in scraper with full book object)
-            # For now, create a placeholder
-            from utils.hashing import generate_content_hash
+            sanitized_html = sanitize_html(html)
 
-            # Create book instance
+            # Create book instance with placeholder hash to satisfy validation
             book = Book(
                 name=name,
                 description=description,
@@ -75,26 +85,36 @@ class BookParser:
                 image_url=image_url,
                 rating=rating,
                 source_url=url,
-                raw_html=sanitize_html(html)
+                raw_html=sanitized_html,
+                content_hash="",  # computed after instantiation
             )
 
-            # Generate content hash
             book.content_hash = generate_content_hash(book)
-
             return book
-        except Exception as e:
-            logger.error(f"Failed to parse book page {url}: {e}", exc_info=True)
-            raise ParsingError(f"Failed to parse book page: {str(e)}")
+        except ParsingError:
+            raise
+        except Exception as exc:
+            logger.error(
+                "Failed to parse book page",
+                extra={"url": url},
+                exc_info=True,
+            )
+            raise ParsingError(f"Failed to parse book page: {exc}") from exc
 
-    def parse_book_urls(self, html: str) -> list[str]:
+    def parse_catalog_page(
+        self,
+        html: str,
+        page_url: Optional[str] = None
+    ) -> CatalogPageSummary:
         """
-        Extract book URLs from catalog listing page.
+        Parse catalog listing page, returning URLs and pagination metadata.
 
         Args:
-            html: HTML content of catalog page
+            html: HTML content of catalog page.
+            page_url: Absolute URL of the catalog page (used for resolving links).
 
         Returns:
-            List of book URLs
+            CatalogPageSummary with book URLs and pagination details.
         """
         try:
             soup = BeautifulSoup(html, "lxml")
@@ -112,14 +132,58 @@ class BookParser:
                 if link and link.get("href"):
                     href = link["href"]
                     # Normalize URL
-                    url = normalize_url(href, self.base_url)
+                    url = self._normalize_catalog_href(href, page_url)
                     urls.append(url)
 
-            logger.debug(f"Extracted {len(urls)} book URLs from catalog page")
-            return urls
-        except Exception as e:
-            logger.error(f"Failed to parse book URLs: {e}", exc_info=True)
-            raise ParsingError(f"Failed to parse book URLs: {str(e)}")
+            # Pagination metadata
+            has_next = soup.select_one("li.next > a") is not None
+            current_page = None
+            total_pages = None
+            page_marker = soup.select_one("li.current")
+            if page_marker:
+                text = page_marker.get_text(strip=True)
+                match = re.search(r"Page\s+(\d+)\s+of\s+(\d+)", text, flags=re.IGNORECASE)
+                if match:
+                    current_page = int(match.group(1))
+                    total_pages = int(match.group(2))
+
+            logger.debug(
+                "Parsed catalog page",
+                extra={
+                    "book_count": len(urls),
+                    "has_next": has_next,
+                    "current_page": current_page,
+                    "total_pages": total_pages
+                }
+            )
+
+            return CatalogPageSummary(
+                book_urls=urls,
+                has_next=has_next,
+                current_page=current_page,
+                total_pages=total_pages
+            )
+        except Exception as exc:
+            logger.error("Failed to parse catalog page", exc_info=True)
+            raise ParsingError(f"Failed to parse book URLs: {exc}") from exc
+
+    def parse_book_urls(
+        self,
+        html: str,
+        page_url: Optional[str] = None
+    ) -> list[str]:
+        """
+        Extract book URLs from catalog listing page.
+
+        Args:
+            html: HTML content of catalog page
+            page_url: Absolute URL of the catalog page (used for resolving links)
+
+        Returns:
+            List of book URLs
+        """
+        summary = self.parse_catalog_page(html, page_url=page_url)
+        return summary.book_urls
 
     def has_next_page(self, html: str) -> bool:
         """
@@ -249,7 +313,7 @@ class BookParser:
 
         return 0
 
-    def _extract_image_url(self, soup: BeautifulSoup, page_url: str) -> str:
+    def _extract_image_url(self, soup: BeautifulSoup) -> str:
         """Extract book cover image URL."""
         # img src in product_gallery or main product image
         img_elem = (
@@ -275,15 +339,11 @@ class BookParser:
         )
         if rating_elem:
             classes = rating_elem.get("class", [])
-            for class_name in classes:
-                if "star-rating" in class_name:
-                    # Extract rating from class
-                    rating_str = class_name.replace("star-rating", "").strip()
-                    if rating_str:
-                        try:
-                            return Rating(rating_str)
-                        except ValueError:
-                            pass
+            if classes:
+                try:
+                    return Rating.from_star_class(" ".join(classes))
+                except ValueError:
+                    logger.debug("Unknown rating class", extra={"classes": classes})
 
         # Fallback: try to find rating in text
         rating_text = soup.get_text()
@@ -293,4 +353,13 @@ class BookParser:
 
         # Default to ONE if not found
         return Rating.ONE
+
+    def _normalize_catalog_href(
+        self,
+        href: str,
+        page_url: Optional[str] = None
+    ) -> str:
+        """Resolve catalogue link href using the specific page_url when available."""
+        base = page_url or self.base_url
+        return normalize_url(href, base)
 

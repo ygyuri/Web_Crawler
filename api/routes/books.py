@@ -1,15 +1,14 @@
 """Book API endpoints."""
 
-from typing import Optional
+from typing import Dict, List, Tuple, Optional
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.auth import verify_api_key
 from api.dependencies import get_book_repository
 from api.schemas.books import BookResponse, BookDetailResponse, PaginatedResponse
 from api.schemas.common import BookFilters, SortBy
-from crawler.models import Rating
 from database.repositories.book_repository import BookRepository
 
 router = APIRouter(prefix="/books", tags=["books"])
@@ -17,13 +16,7 @@ router = APIRouter(prefix="/books", tags=["books"])
 
 @router.get("", response_model=PaginatedResponse[BookResponse])
 async def get_books(
-    category: Optional[str] = Query(None, description="Filter by category"),
-    min_price: Optional[float] = Query(None, ge=0, description="Minimum price"),
-    max_price: Optional[float] = Query(None, ge=0, description="Maximum price"),
-    rating: Optional[str] = Query(None, description="Filter by rating"),
-    sort_by: Optional[str] = Query("name", description="Sort field"),
-    page: int = Query(1, ge=1, description="Page number"),
-    limit: int = Query(20, ge=1, le=100, description="Items per page"),
+    filters: BookFilters = Depends(),
     api_key: str = Depends(verify_api_key),
     book_repo: BookRepository = Depends(get_book_repository)
 ):
@@ -44,71 +37,64 @@ async def get_books(
     Returns:
         Paginated list of books
     """
-    # Build filters
-    filters = {"status": "active"}
+    # Build Mongo filters
+    query_filters: Dict = {"status": "active"}
+    if filters.category:
+        query_filters["category"] = filters.category
 
-    if category:
-        filters["category"] = category
+    if filters.min_price is not None or filters.max_price is not None:
+        price_filter: Dict[str, float] = {}
+        if filters.min_price is not None:
+            price_filter["$gte"] = filters.min_price
+        if filters.max_price is not None:
+            price_filter["$lte"] = filters.max_price
+        query_filters["price_incl_tax"] = price_filter
 
-    if min_price is not None or max_price is not None:
-        price_filter = {}
-        if min_price is not None:
-            price_filter["$gte"] = min_price
-        if max_price is not None:
-            price_filter["$lte"] = max_price
-        filters["price_incl_tax"] = price_filter
+    if filters.rating is not None:
+        query_filters["rating"] = filters.rating.value
 
-    if rating:
-        try:
-            rating_enum = Rating(rating)
-            filters["rating"] = rating_enum.value
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid rating: {rating}"
-            )
-
-    # Build sort
     sort_mapping = {
-        "name": [("name", 1)],
-        "price": [("price_incl_tax", 1)],
-        "rating": [("rating", -1)],
-        "reviews": [("num_reviews", -1)]
+        SortBy.NAME: [("name", 1)],
+        SortBy.PRICE: [("price_incl_tax", 1)],
+        SortBy.RATING: [("rating", -1)],
+        SortBy.REVIEWS: [("num_reviews", -1)],
     }
-    sort = sort_mapping.get(sort_by, [("name", 1)])
+    sort = sort_mapping.get(filters.sort_by, [("name", 1)])
 
-    # Calculate skip
-    skip = (page - 1) * limit
+    skip = (filters.page - 1) * filters.limit
 
-    # Fetch books
-    books = await book_repo.find_books(filters, skip=skip, limit=limit, sort=sort)
-    total = await book_repo.count_books(filters)
+    items_with_ids = await book_repo.find_books_with_ids(
+        query_filters,
+        skip=skip,
+        limit=filters.limit,
+        sort=sort
+    )
+    total = await book_repo.count_books(query_filters)
 
-    # Convert to response models
-    book_responses = []
-    for book in books:
-        # Get book ID from database
-        book_doc = await book_repo.collection.find_one({"source_url": str(book.source_url)})
-        book_id = str(book_doc["_id"]) if book_doc else str(book.source_url)
-
-        book_responses.append(
-            BookResponse(
-                id=book_id,
-                name=book.name,
-                description=book.description,
-                category=book.category,
-                price_excl_tax=book.price_excl_tax,
-                price_incl_tax=book.price_incl_tax,
-                availability=book.availability,
-                num_reviews=book.num_reviews,
-                image_url=book.image_url,
-                rating=book.rating,
-                source_url=book.source_url,
-                crawl_timestamp=book.crawl_timestamp
-            )
+    book_responses: List[BookResponse] = [
+        BookResponse(
+            id=book_id,
+            name=book.name,
+            description=book.description,
+            category=book.category,
+            price_excl_tax=book.price_excl_tax,
+            price_incl_tax=book.price_incl_tax,
+            availability=book.availability,
+            num_reviews=book.num_reviews,
+            image_url=book.image_url,
+            rating=book.rating,
+            source_url=book.source_url,
+            crawl_timestamp=book.crawl_timestamp
         )
+        for book_id, book in items_with_ids
+    ]
 
-    return PaginatedResponse.create(book_responses, total, page, limit)
+    return PaginatedResponse.create(
+        book_responses,
+        total,
+        filters.page,
+        filters.limit
+    )
 
 
 @router.get("/{book_id}", response_model=BookDetailResponse)
@@ -128,19 +114,33 @@ async def get_book(
     Returns:
         Book details including raw HTML
     """
-    # Try to get by ID first, then by URL
-    book = await book_repo.get_book_by_id(book_id)
-    if not book:
-        book = await book_repo.get_book_by_url(book_id)
+    doc = None
+    canonical_id = None
 
-    if not book:
+    # Try lookup by ObjectId
+    try:
+        doc = await book_repo.collection.find_one({"_id": ObjectId(book_id)})
+        if doc:
+            canonical_id = str(doc["_id"])
+    except Exception:
+        doc = None
+
+    # Fallback lookup by source_url
+    if not doc:
+        doc = await book_repo.collection.find_one({"source_url": book_id})
+        if doc:
+            canonical_id = str(doc["_id"])
+
+    if not doc or canonical_id is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Book not found: {book_id}"
         )
 
+    book = book_repo._document_to_book(doc)
+
     return BookDetailResponse(
-        id=book_id,
+        id=canonical_id,
         name=book.name,
         description=book.description,
         category=book.category,

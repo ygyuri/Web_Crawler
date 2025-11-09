@@ -26,6 +26,30 @@ class DatabaseSettings(BaseSettings):
         default=10,
         description="Minimum connection pool size"
     )
+    server_selection_timeout_ms: int = Field(
+        default=5000,
+        description="Server selection timeout (ms)"
+    )
+    connect_timeout_ms: int = Field(
+        default=2000,
+        description="Connect timeout (ms)"
+    )
+    socket_timeout_ms: int = Field(
+        default=10000,
+        description="Socket timeout (ms)"
+    )
+    max_idle_time_ms: int = Field(
+        default=300000,
+        description="Maximum idle time for pooled connections (ms)"
+    )
+    tls: bool = Field(
+        default=False,
+        description="Enable TLS for MongoDB connection"
+    )
+    tls_allow_invalid_certificates: bool = Field(
+        default=False,
+        description="Allow invalid TLS certificates (useful for testing only)"
+    )
 
 
 class APISettings(BaseSettings):
@@ -92,11 +116,39 @@ class CrawlerSettings(BaseSettings):
     )
     user_agent: str = Field(
         default="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        description="User-Agent string for requests"
+        description="Default User-Agent string for requests"
+    )
+    user_agents: List[str] = Field(
+        default_factory=lambda: [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/118.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/605.1.15 "
+            "(KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+            "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:117.0) Gecko/20100101 Firefox/117.0",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 "
+            "(KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1"
+        ],
+        description="Pool of User-Agent strings to rotate per request"
     )
     respect_robots_txt: bool = Field(
         default=True,
         description="Whether to respect robots.txt"
+    )
+    circuit_breaker_failure_threshold: int = Field(
+        default=5,
+        description="Number of consecutive failures before opening the circuit"
+    )
+    circuit_breaker_reset_timeout: int = Field(
+        default=60,
+        description="Cooldown period in seconds before circuit transitions to half-open"
+    )
+    circuit_breaker_half_open_max_calls: int = Field(
+        default=2,
+        description="Maximum trial requests allowed while circuit is half-open"
+    )
+    recrawl_interval_hours: int = Field(
+        default=12,
+        description="Minimum hours before re-crawling a book that was recently fetched"
     )
 
 
@@ -122,7 +174,7 @@ class SchedulerSettings(BaseSettings):
         description="Enable email alerts for significant changes"
     )
     smtp_host: str = Field(
-        default="",
+        default="smtp.ethereal.email",
         description="SMTP server host"
     )
     smtp_port: int = Field(

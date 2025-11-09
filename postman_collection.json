@@ -1,0 +1,109 @@
+{
+  "info": {
+    "name": "Books Crawler API",
+    "description": "API collection for Books Crawler",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "api_key",
+      "value": "your-api-key-here",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": ["{{base_url}}"],
+          "path": ["health"]
+        }
+      }
+    },
+    {
+      "name": "Get Books",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{api_key}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/books?page=1&limit=20",
+          "host": ["{{base_url}}"],
+          "path": ["books"],
+          "query": [
+            {"key": "page", "value": "1"},
+            {"key": "limit", "value": "20"},
+            {"key": "category", "value": "", "disabled": true},
+            {"key": "min_price", "value": "", "disabled": true},
+            {"key": "max_price", "value": "", "disabled": true},
+            {"key": "rating", "value": "", "disabled": true},
+            {"key": "sort_by", "value": "name", "disabled": true}
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Book by ID",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{api_key}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/books/{book_id}",
+          "host": ["{{base_url}}"],
+          "path": ["books", "{book_id}"],
+          "variable": [
+            {
+              "key": "book_id",
+              "value": "507f1f77bcf86cd799439011"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Changes",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{api_key}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/changes?page=1&limit=50",
+          "host": ["{{base_url}}"],
+          "path": ["changes"],
+          "query": [
+            {"key": "page", "value": "1"},
+            {"key": "limit", "value": "50"},
+            {"key": "since", "value": "", "disabled": true},
+            {"key": "change_type", "value": "", "disabled": true}
+          ]
+        }
+      }
+    }
+  ]
+}
+

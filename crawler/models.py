@@ -1,10 +1,15 @@
 """Pydantic models for book data and crawler state."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, ConfigDict
+
+
+def _utc_now() -> datetime:
+    """Return a timezone-aware UTC timestamp."""
+    return datetime.now(timezone.utc)
 
 
 class Rating(str, Enum):
@@ -61,7 +66,7 @@ class Book(BaseModel):
     # Metadata
     source_url: HttpUrl = Field(..., description="Source URL of the book page")
     crawl_timestamp: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=_utc_now,
         description="Timestamp when book was crawled"
     )
     status: str = Field(
@@ -101,14 +106,13 @@ class Book(BaseModel):
         """Normalize category string."""
         return v.strip()
 
-    class Config:
-        """Pydantic configuration."""
-
-        use_enum_values = True
-        json_encoders = {
+    model_config = ConfigDict(
+        use_enum_values=True,
+        json_encoders={
             datetime: lambda v: v.isoformat(),
             HttpUrl: str,
         }
+    )
 
 
 class CrawlerState(BaseModel):
@@ -120,7 +124,7 @@ class CrawlerState(BaseModel):
         description="Last successfully crawled page number"
     )
     last_run: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=_utc_now,
         description="Timestamp of last crawl run"
     )
     status: str = Field(
@@ -137,10 +141,9 @@ class CrawlerState(BaseModel):
         description="Error message if status is 'error'"
     )
 
-    class Config:
-        """Pydantic configuration."""
-
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             datetime: lambda v: v.isoformat(),
         }
+    )
 

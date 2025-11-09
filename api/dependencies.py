@@ -1,5 +1,8 @@
 """FastAPI dependencies for dependency injection."""
 
+from typing import Tuple
+
+from fastapi import Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from database.connection import Database
@@ -17,32 +20,41 @@ async def get_db() -> AsyncIOMotorDatabase:
     return Database.get_database()
 
 
-def get_book_repository(db: AsyncIOMotorDatabase = None) -> BookRepository:
+async def get_book_repository() -> BookRepository:
     """
     Get book repository instance.
-
-    Args:
-        db: Database instance (optional, will be fetched if not provided)
 
     Returns:
         BookRepository instance
     """
-    if db is None:
-        db = Database.get_database()
+    db = Database.get_database()
     return BookRepository(db)
 
 
-def get_change_repository(db: AsyncIOMotorDatabase = None) -> ChangeRepository:
+async def get_change_repository() -> ChangeRepository:
     """
     Get change repository instance.
-
-    Args:
-        db: Database instance (optional, will be fetched if not provided)
 
     Returns:
         ChangeRepository instance
     """
-    if db is None:
-        db = Database.get_database()
+    db = Database.get_database()
     return ChangeRepository(db)
+
+
+def get_pagination(
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(20, ge=1, le=100, description="Items per page")
+) -> Tuple[int, int]:
+    """
+    Extract pagination parameters.
+
+    Args:
+        page: Requested page number.
+        limit: Items per page.
+
+    Returns:
+        Tuple of (page, limit).
+    """
+    return page, limit
 

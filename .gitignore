@@ -129,10 +129,9 @@ dmypy.json
 # Project specific
 logs/
 *.log
-reports/
-*.csv
-*.json
-!docs/sample_*.json
+# Reports generated at runtime
+/reports/
+!reports/.gitkeep
 
 # Docker
 .dockerignore

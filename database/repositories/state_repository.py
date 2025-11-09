@@ -1,6 +1,6 @@
 """Crawler state repository for state management."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -80,7 +80,7 @@ class StateRepository:
                 {
                     "$set": {
                         "last_page": page,
-                        "last_run": datetime.utcnow()
+                        "last_run": datetime.now(timezone.utc)
                     }
                 },
                 upsert=True
@@ -88,5 +88,14 @@ class StateRepository:
             return result.modified_count > 0 or result.upserted_id is not None
         except Exception as e:
             logger.error(f"Failed to update last page: {e}", exc_info=True)
+            raise
+
+    async def clear_state(self) -> None:
+        """Delete persisted crawler state."""
+        try:
+            await self.collection.delete_one({"_id": "crawler_state"})
+            logger.debug("Cleared crawler state")
+        except Exception as e:
+            logger.error(f"Failed to clear state: {e}", exc_info=True)
             raise
 

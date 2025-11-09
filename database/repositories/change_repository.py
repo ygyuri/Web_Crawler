@@ -1,7 +1,7 @@
 """Change repository for change log operations."""
 
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -56,10 +56,11 @@ class ChangeRepository:
                 field_name=field_name,
                 old_value=str(old_value) if old_value is not None else None,
                 new_value=str(new_value) if new_value is not None else None,
-                detected_at=datetime.utcnow()
+                detected_at=datetime.now(timezone.utc)
             )
 
-            result = await self.collection.insert_one(change_doc.model_dump(by_alias=True))
+            payload = change_doc.model_dump(by_alias=True, exclude_none=True)
+            result = await self.collection.insert_one(payload)
             change_id = str(result.inserted_id)
 
             logger.info(
@@ -74,6 +75,8 @@ class ChangeRepository:
     async def get_recent_changes(
         self,
         since: Optional[datetime] = None,
+        change_type: Optional[str] = None,
+        skip: int = 0,
         limit: int = 50
     ) -> List[ChangeDocument]:
         """
@@ -81,17 +84,26 @@ class ChangeRepository:
 
         Args:
             since: Filter changes since this datetime
+            change_type: Filter by change type
+            skip: Number of documents to skip
             limit: Maximum number of changes to return
 
         Returns:
             List of ChangeDocument instances
         """
         try:
-            filters = {}
+            filters: Dict = {}
             if since:
                 filters["detected_at"] = {"$gte": since}
+            if change_type:
+                filters["change_type"] = change_type
 
-            cursor = self.collection.find(filters).sort("detected_at", -1).limit(limit)
+            cursor = (
+                self.collection.find(filters)
+                .sort("detected_at", -1)
+                .skip(skip)
+                .limit(limit)
+            )
 
             changes = []
             async for doc in cursor:
@@ -123,5 +135,35 @@ class ChangeRepository:
             return changes
         except Exception as e:
             logger.error(f"Failed to get changes by book: {e}", exc_info=True)
+            raise
+
+    async def count_recent_changes(
+        self,
+        since: Optional[datetime] = None,
+        change_type: Optional[str] = None
+    ) -> int:
+        """
+        Count changes matching filters.
+
+        Args:
+            since: Filter changes since this datetime
+            change_type: Filter by change type
+
+        Returns:
+            Count of matching change documents.
+        """
+        try:
+            filters: Dict = {}
+            if since:
+                filters["detected_at"] = {"$gte": since}
+            if change_type:
+                filters["change_type"] = change_type
+            return await self.collection.count_documents(filters)
+        except Exception as exc:
+            logger.error(
+                "Failed to count recent changes",
+                extra={"error": str(exc)},
+                exc_info=True
+            )
             raise
 

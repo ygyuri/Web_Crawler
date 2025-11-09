@@ -26,10 +26,12 @@ services:
       mongodb:
         condition: service_healthy
     environment:
-      - MONGODB_URL=mongodb://mongodb:27017
+      - MONGODB_URL=mongodb://mongodb:27017/books_crawler?directConnection=true
       - MONGODB_DB_NAME=books_crawler
     volumes:
       - ./logs:/app/logs
+    env_file:
+      - .env
     restart: on-failure
 
   scheduler:
@@ -42,11 +44,13 @@ services:
       mongodb:
         condition: service_healthy
     environment:
-      - MONGODB_URL=mongodb://mongodb:27017
+      - MONGODB_URL=mongodb://mongodb:27017/books_crawler?directConnection=true
       - MONGODB_DB_NAME=books_crawler
     volumes:
       - ./logs:/app/logs
       - ./reports:/app/reports
+    env_file:
+      - .env
     restart: unless-stopped
 
   api:
@@ -61,18 +65,37 @@ services:
       mongodb:
         condition: service_healthy
     environment:
-      - MONGODB_URL=mongodb://mongodb:27017
+      - MONGODB_URL=mongodb://mongodb:27017/books_crawler?directConnection=true
       - MONGODB_DB_NAME=books_crawler
       - API_HOST=0.0.0.0
       - API_PORT=8000
     volumes:
       - ./logs:/app/logs
+    env_file:
+      - .env
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+
+  mongo-express:
+    image: mongo-express:1.0.2
+    container_name: books_crawler_mongo_express
+    ports:
+      - "8081:8081"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      - ME_CONFIG_MONGODB_URL=mongodb://mongodb:27017/books_crawler?directConnection=true
+      - ME_CONFIG_SITE_BASEURL=/
+      - ME_CONFIG_MONGODB_ENABLE_ADMIN=true
+      - ME_CONFIG_BASICAUTH=true
+      - ME_CONFIG_BASICAUTH_USERNAME=admin
+      - ME_CONFIG_BASICAUTH_PASSWORD=pass
+    restart: unless-stopped
 
 volumes:
   mongodb_data:

@@ -1,13 +1,11 @@
 """Changes API endpoint."""
 
-from datetime import datetime
-from typing import Optional
-
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 
 from api.auth import verify_api_key
 from api.dependencies import get_change_repository
 from api.schemas.books import ChangeResponse, PaginatedResponse
+from api.schemas.common import ChangeFilters
 from database.repositories.change_repository import ChangeRepository
 
 router = APIRouter(prefix="/changes", tags=["changes"])
@@ -15,10 +13,7 @@ router = APIRouter(prefix="/changes", tags=["changes"])
 
 @router.get("", response_model=PaginatedResponse[ChangeResponse])
 async def get_changes(
-    since: Optional[str] = Query(None, description="Filter changes since ISO datetime"),
-    change_type: Optional[str] = Query(None, description="Filter by change type"),
-    limit: int = Query(50, ge=1, le=100, description="Items per page"),
-    page: int = Query(1, ge=1, description="Page number"),
+    filters: ChangeFilters = Depends(),
     api_key: str = Depends(verify_api_key),
     change_repo: ChangeRepository = Depends(get_change_repository)
 ):
@@ -26,39 +21,34 @@ async def get_changes(
     Get recent changes with filtering.
 
     Args:
-        since: Filter changes since this datetime (ISO format)
-        change_type: Filter by change type
-        limit: Items per page
-        page: Page number
-        api_key: API key (from dependency)
-        change_repo: Change repository (from dependency)
+        filters: Query parameter model for filtering/pagination.
+        api_key: API key (from dependency).
+        change_repo: Change repository (from dependency).
 
     Returns:
-        Paginated list of changes
+        Paginated list of changes.
     """
-    # Parse since datetime
-    since_dt = None
-    if since:
-        try:
-            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
-        except ValueError:
-            since_dt = None
+    change_type_value = (
+        filters.change_type.value if filters.change_type is not None else None
+    )
 
-    # Fetch changes
-    changes = await change_repo.get_recent_changes(since=since_dt, limit=limit * page)
+    skip = (filters.page - 1) * filters.limit
 
-    # Filter by change type if specified
-    if change_type:
-        changes = [c for c in changes if c.change_type == change_type]
+    changes = await change_repo.get_recent_changes(
+        since=filters.since,
+        change_type=change_type_value,
+        skip=skip,
+        limit=filters.limit
+    )
 
-    # Paginate
-    skip = (page - 1) * limit
-    paginated_changes = changes[skip:skip + limit]
+    total = await change_repo.count_recent_changes(
+        since=filters.since,
+        change_type=change_type_value
+    )
 
-    # Convert to response models
     change_responses = [
         ChangeResponse(
-            id=str(change._id),
+            id=str(change.id) if change.id else "",
             book_id=str(change.book_id),
             book_name=change.book_name,
             change_type=change.change_type,
@@ -67,9 +57,13 @@ async def get_changes(
             new_value=change.new_value,
             detected_at=change.detected_at
         )
-        for change in paginated_changes
+        for change in changes
     ]
 
-    total = len(changes)
-    return PaginatedResponse.create(change_responses, total, page, limit)
+    return PaginatedResponse.create(
+        change_responses,
+        total,
+        filters.page,
+        filters.limit
+    )
 

@@ -1,5 +1,6 @@
 """Book repository for database operations."""
 
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from bson import ObjectId
@@ -7,7 +8,6 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from config.logging_config import get_logger
 from crawler.models import Book
-from database.models import BookDocument
 
 logger = get_logger(__name__)
 
@@ -24,17 +24,17 @@ class BookRepository:
         """
         self.db = db
         self.collection = db.books
+        self.failed_collection = db.failed_crawls
 
-    async def upsert_book(self, book: Book, detect_changes: bool = False) -> Tuple[str, bool]:
+    async def upsert_book(self, book: Book) -> str:
         """
         Insert or update a book by source_url.
 
         Args:
-            book: Book model instance
-            detect_changes: Whether to detect and return change status
+            book: Book model instance.
 
         Returns:
-            Tuple of (book_id, is_new_book)
+            The MongoDB document ID as a string.
         """
         try:
             book_dict = book.model_dump(exclude={"raw_html"})
@@ -68,10 +68,14 @@ class BookRepository:
                 book_id = str(doc["_id"])
 
             logger.debug(
-                f"Upserted book: {book.name}",
-                extra={"book_id": book_id, "source_url": str(book.source_url), "is_new": is_new}
+                "Upserted book",
+                extra={
+                    "book_id": book_id,
+                    "source_url": str(book.source_url),
+                    "is_new": is_new
+                }
             )
-            return book_id, is_new
+            return book_id
         except Exception as e:
             logger.error(
                 f"Failed to upsert book: {e}",
@@ -79,6 +83,72 @@ class BookRepository:
                 exc_info=True
             )
             raise
+
+    async def get_existing_metadata_map(self, urls: List[str]) -> Dict[str, Dict]:
+        """
+        Fetch existing book metadata for a set of URLs.
+
+        Args:
+            urls: List of book source URLs.
+
+        Returns:
+            Mapping of URL to metadata (content_hash, crawl_timestamp).
+        """
+        if not urls:
+            return {}
+
+        cursor = self.collection.find(
+            {"source_url": {"$in": urls}},
+            {"source_url": 1, "content_hash": 1, "crawl_timestamp": 1}
+        )
+
+        metadata: Dict[str, Dict] = {}
+        async for doc in cursor:
+            metadata[doc["source_url"]] = {
+                "content_hash": doc.get("content_hash"),
+                "crawl_timestamp": doc.get("crawl_timestamp")
+            }
+        return metadata
+
+    async def record_failed_crawl(
+        self,
+        url: str,
+        html: Optional[str],
+        error: str,
+        stage: str
+    ) -> None:
+        """
+        Persist failed crawl information for later inspection.
+
+        Args:
+            url: Source URL that failed.
+            html: Raw HTML captured (if any).
+            error: Error message.
+            stage: Stage where failure occurred (e.g., "fetch", "parse").
+        """
+        try:
+            doc = {
+                "source_url": url,
+                "raw_html": html,
+                "error": error,
+                "stage": stage,
+                "last_attempt": datetime.now(timezone.utc)
+            }
+            await self.failed_collection.update_one(
+                {"source_url": url},
+                {"$set": doc},
+                upsert=True
+            )
+            logger.debug(
+                "Recorded failed crawl",
+                extra={"source_url": url, "stage": stage}
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to record crawl failure",
+                extra={"source_url": url, "stage": stage, "error": str(exc)},
+                exc_info=True
+            )
 
     async def get_book_by_url(self, url: str) -> Optional[Book]:
         """
@@ -158,18 +228,51 @@ class BookRepository:
         Returns:
             List of Book models
         """
+        results = await self.find_books_with_ids(
+            filters=filters,
+            skip=skip,
+            limit=limit,
+            sort=sort
+        )
+        return [book for _, book in results]
+
+    async def find_books_with_ids(
+        self,
+        filters: Dict,
+        skip: int = 0,
+        limit: int = 20,
+        sort: Optional[List[tuple]] = None
+    ) -> List[Tuple[str, Book]]:
+        """
+        Find books and return tuples of (book_id, Book).
+
+        Args:
+            filters: MongoDB query filters
+            skip: Number of documents to skip
+            limit: Maximum number of documents to return
+            sort: List of (field, direction) tuples for sorting
+
+        Returns:
+            List of tuples containing the document ID and Book model.
+        """
         try:
             cursor = self.collection.find(filters)
             if sort:
                 cursor = cursor.sort(sort)
             cursor = cursor.skip(skip).limit(limit)
 
-            books = []
+            books: List[Tuple[str, Book]] = []
             async for doc in cursor:
-                books.append(self._document_to_book(doc))
+                book_id = str(doc["_id"])
+                book = self._document_to_book(doc)
+                books.append((book_id, book))
             return books
-        except Exception as e:
-            logger.error(f"Failed to find books: {e}", exc_info=True)
+        except Exception as exc:
+            logger.error(
+                "Failed to find books with ids",
+                extra={"error": str(exc), "filters": filters},
+                exc_info=True
+            )
             raise
 
     async def count_books(self, filters: Dict) -> int:

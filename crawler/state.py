@@ -1,6 +1,6 @@
 """Crawler state management."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from config.logging_config import get_logger
@@ -59,7 +59,7 @@ class StateManager:
 
         state = CrawlerState(
             last_page=last_page,
-            last_run=datetime.utcnow(),
+            last_run=datetime.now(timezone.utc),
             status=status,
             total_books_crawled=total_books
         )
@@ -79,4 +79,10 @@ class StateManager:
             await self.initialize()
 
         await self.repository.update_last_page(page)
+
+    async def reset(self) -> None:
+        """Clear persisted crawler state."""
+        if not self.repository:
+            await self.initialize()
+        await self.repository.clear_state()
 

@@ -66,10 +66,44 @@ cp .env.example .env
 Edit `.env` with your configuration:
 
 ```env
+# Database
 MONGODB_URL=mongodb://localhost:27017
 MONGODB_DB_NAME=books_crawler
-API_KEYS=your-api-key-here,another-key
-# ... other settings
+MONGODB_MAX_POOL_SIZE=100
+MONGODB_MIN_POOL_SIZE=10
+MONGODB_SERVER_SELECTION_TIMEOUT_MS=5000
+MONGODB_CONNECT_TIMEOUT_MS=2000
+MONGODB_SOCKET_TIMEOUT_MS=10000
+MONGODB_MAX_IDLE_TIME_MS=300000
+MONGODB_TLS=false
+MONGODB_TLS_ALLOW_INVALID_CERTIFICATES=false
+
+# API
+API_HOST=0.0.0.0
+API_PORT=8000
+API_API_KEYS=your-api-key-here,another-key
+API_RATE_LIMIT=100
+API_CORS_ORIGINS=http://localhost:3000,http://localhost:8000
+
+# Crawler
+CRAWLER_BASE_URL=https://books.toscrape.com
+CRAWLER_MAX_CONCURRENT_REQUESTS=10
+CRAWLER_REQUEST_TIMEOUT=30
+CRAWLER_MAX_RETRIES=3
+CRAWLER_RETRY_BACKOFF=2.0
+CRAWLER_RECRAWL_INTERVAL_HOURS=12
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FILE=logs/crawler.log
+
+# Scheduler / Alerts
+SCHEDULER_ENABLE_EMAIL_ALERTS=false
+SCHEDULER_SMTP_HOST=smtp.ethereal.email
+SCHEDULER_SMTP_PORT=587
+SCHEDULER_SMTP_USER=
+SCHEDULER_SMTP_PASSWORD=
+SCHEDULER_ALERT_EMAIL_TO=
 ```
 
 ## Running the Application
@@ -195,23 +229,40 @@ All configuration is done via environment variables (see `.env.example`):
 ### MongoDB Configuration
 - `MONGODB_URL`: MongoDB connection URL
 - `MONGODB_DB_NAME`: Database name
+- `MONGODB_MAX_POOL_SIZE`: Maximum connection pool size (default: 100)
+- `MONGODB_MIN_POOL_SIZE`: Minimum connection pool size (default: 10)
+- `MONGODB_SERVER_SELECTION_TIMEOUT_MS`: Server selection timeout in milliseconds (default: 5000)
+- `MONGODB_CONNECT_TIMEOUT_MS`: Connection timeout in milliseconds (default: 2000)
+- `MONGODB_SOCKET_TIMEOUT_MS`: Socket timeout in milliseconds (default: 10000)
+- `MONGODB_MAX_IDLE_TIME_MS`: Maximum idle time for pooled connections in milliseconds (default: 300000)
+- `MONGODB_TLS`: Enable TLS for MongoDB connection (default: false)
+- `MONGODB_TLS_ALLOW_INVALID_CERTIFICATES`: Allow invalid TLS certificates (default: false)
 
 ### API Configuration
 - `API_HOST`: API host (default: 0.0.0.0)
 - `API_PORT`: API port (default: 8000)
 - `API_KEYS`: Comma-separated list of valid API keys
 - `API_RATE_LIMIT`: Requests per hour per API key (default: 100)
+- `API_CORS_ORIGINS`: Comma-separated list of allowed origins
 
 ### Crawler Configuration
 - `CRAWLER_BASE_URL`: Target website URL
 - `CRAWLER_MAX_CONCURRENT_REQUESTS`: Max concurrent requests (default: 10)
 - `CRAWLER_REQUEST_TIMEOUT`: Request timeout in seconds (default: 30)
 - `CRAWLER_MAX_RETRIES`: Maximum retry attempts (default: 3)
+- `CRAWLER_RETRY_BACKOFF`: Exponential backoff multiplier (default: 2.0)
+- `CRAWLER_RECRAWL_INTERVAL_HOURS`: Minimum hours before re-crawling an unchanged book (default: 12)
 
 ### Scheduler Configuration
 - `SCHEDULER_CRAWL_SCHEDULE_HOUR`: Hour to run daily crawl (0-23, default: 2)
 - `SCHEDULER_CRAWL_SCHEDULE_MINUTE`: Minute to run daily crawl (0-59, default: 0)
 - `SCHEDULER_TIMEZONE`: Timezone (default: UTC)
+- `SCHEDULER_ENABLE_EMAIL_ALERTS`: Enable email alerts (default: false)
+- `SCHEDULER_SMTP_HOST`: SMTP host (default: smtp.ethereal.email)
+- `SCHEDULER_SMTP_PORT`: SMTP port (default: 587)
+- `SCHEDULER_SMTP_USER`: SMTP username (blank by default; provide your own when enabling alerts)
+- `SCHEDULER_SMTP_PASSWORD`: SMTP password (blank by default)
+- `SCHEDULER_ALERT_EMAIL_TO`: Alert recipient address (blank by default)
 
 ## Database Schema
 
@@ -264,31 +315,40 @@ All configuration is done via environment variables (see `.env.example`):
 }
 ```
 
+## Repository Layer
+
+### BookRepository (`database/repositories/book_repository.py`)
+- `upsert_book(book: Book) -> str`: Inserts or updates a book and returns the document ID as a string. New/updated status is logged internally.
+- `find_books(filters: dict, skip: int = 0, limit: int = 20, sort: Optional[List[tuple]] = None) -> List[Book]`: `sort` should be provided as a list of `(field, direction)` tuples compatible with Motor, e.g. `[("price_incl_tax", 1), ("rating", -1)]`.
+- `count_books(filters: dict) -> int`: Returns the number of matching documents.
+- Additional helpers such as `get_book_by_url`, `get_book_by_id`, and `update_book` expose common CRUD operations.
+
+### ChangeRepository (`database/repositories/change_repository.py`)
+- `log_change(...) -> str`: Records a change event and returns the change document ID.
+- `get_recent_changes(since: datetime | None, limit: int) -> List[ChangeDocument]`: Retrieves recent changes sorted by newest first.
+- `get_changes_by_book(book_id: str) -> List[ChangeDocument]`: Returns a book-specific change history.
+
+### StateRepository (`database/repositories/state_repository.py`)
+- `save_state(state: CrawlerState) -> bool`: Persists the crawler state (upsert).
+- `get_last_state() -> Optional[CrawlerState]`: Fetches the latest crawler state snapshot.
+- `update_last_page(page: int) -> bool`: Updates the checkpoint page and refreshes the timestamp.
+
 ## Testing
 
 ### Run Tests
 
 ```bash
-pytest
-```
-
-### Run with Coverage
-
-```bash
-pytest --cov=. --cov-report=html
-```
-
-### Run Specific Test Categories
-
-```bash
 # Unit tests
-pytest tests/unit/
+pytest tests/unit --cov=crawler --cov=utils --cov-report=term-missing
 
 # Integration tests
-pytest tests/integration/
+pytest tests/integration --cov=database --cov=api --cov-append
 
-# E2E tests
-pytest tests/e2e/
+# End-to-end tests
+pytest tests/e2e --cov=crawler --cov=scheduler --cov-append
+
+# Full suite with HTML coverage report
+pytest --cov=. --cov-report=html
 ```
 
 ## Project Structure
@@ -388,3 +448,14 @@ MIT License
 
 For questions or issues, contact: sudipto@filerskeepers.co
 
+
+## Environment Configuration
+
+1. Copy `.env.example` to `.env` and fill in any sensitive values:
+   ```bash
+   cp .env.example .env
+   ```
+   - `SCHEDULER_SMTP_*` controls email delivery for report/alert notifications. Leave these blank or point them to your own SMTP provider; Ethereal defaults are included as placeholders only.
+   - Set `SCHEDULER_ENABLE_EMAIL_ALERTS=true` if you want emails sent; otherwise keep it `false`.
+
+2. With Docker Compose, `.env` is automatically loaded by the app services, so secrets stay out of version control.

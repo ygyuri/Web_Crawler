@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Generic, List, Optional, TypeVar
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, ConfigDict
 
 from crawler.models import Rating
 
@@ -26,14 +26,13 @@ class BookResponse(BaseModel):
     source_url: HttpUrl = Field(..., description="Source URL")
     crawl_timestamp: datetime = Field(..., description="Crawl timestamp")
 
-    class Config:
-        """Pydantic configuration."""
-
-        use_enum_values = True
-        json_encoders = {
+    model_config = ConfigDict(
+        use_enum_values=True,
+        json_encoders={
             datetime: lambda v: v.isoformat(),
             HttpUrl: str,
         }
+    )
 
 
 class BookDetailResponse(BookResponse):
@@ -54,12 +53,11 @@ class ChangeResponse(BaseModel):
     new_value: Optional[str] = Field(None, description="New value")
     detected_at: datetime = Field(..., description="Detection timestamp")
 
-    class Config:
-        """Pydantic configuration."""
-
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             datetime: lambda v: v.isoformat(),
         }
+    )
 
 
 class PaginatedResponse(BaseModel, Generic[T]):

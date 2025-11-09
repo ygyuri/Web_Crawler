@@ -89,11 +89,10 @@ async def log_requests(request: Request, call_next):
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    db_healthy = await Database.health_check()
-    return {
-        "status": "healthy" if db_healthy else "unhealthy",
-        "database": "connected" if db_healthy else "disconnected"
-    }
+    db_health = await Database.health_check()
+    status = "healthy" if db_health.get("healthy") else "unhealthy"
+    response = {"status": status, "database": db_health}
+    return response
 
 
 @app.exception_handler(Exception)
